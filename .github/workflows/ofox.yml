@@ -4,11 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       MANIFEST_BRANCH:
-        description: 'OrangeFox Branch (Recomendado 12.1)'
+        description: 'OrangeFox Branch'
         required: true
         default: '12.1'
         type: choice
         options:
+        - 14.1
         - 12.1
         - 11.0
       DEVICE_TREE:
@@ -39,7 +40,7 @@ on:
       LDCHECK:
         description: 'Path of blobs to check' 
         required: true
-        default: 'vendor/bin/hw/android.hardware.security.keymint-service.mediatek'
+        default: 'vendor/bin/hw/android.hardware.security.keymint@3.0-service.mitee'
       RECOVERY_INSTALLER:
         description: 'Include recovery installer zip'
         type: boolean
@@ -65,6 +66,7 @@ jobs:
         echo "Displaying variables/inputs."
         echo "Branch: ${{ github.event.inputs.MANIFEST_BRANCH }}"
         echo "Device: ${{ github.event.inputs.DEVICE_NAME }}"
+        echo "Blob a revisar: ${{ github.event.inputs.LDCHECK }}"
         echo "::endgroup::"
 
     - name: 🧹 Limpieza Crítica de Disco
@@ -84,7 +86,7 @@ jobs:
     - name: Build Environment
       run: |
         sudo apt update && sudo apt -y upgrade
-        sudo apt install -y aria2 zip xz-utils bc ccache lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev libsdl1.2-dev build-essential libgtk-3-dev libglu1-mesa-dev freeglut3-dev git libxml2 lzop pngcrush schedtool squashfs-tools imagemagick libbz2-dev lzma ncftp qemu-user-static libstdc++-10-dev libncurses6 python3 tar
+        DEBIAN_FRONTEND=noninteractive sudo apt-get install -yq --no-install-recommends aria2 zip xz-utils bc ccache lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev libsdl1.2-dev build-essential libgtk-3-dev libglu1-mesa-dev freeglut3-dev git libxml2 lzop pngcrush schedtool squashfs-tools imagemagick libbz2-dev lzma ncftp qemu-user-static libstdc++-10-dev libncurses6 python3 tar
         git clone https://gitlab.com/OrangeFox/misc/scripts
         cd scripts
         sudo bash setup/android_build_env.sh
@@ -107,14 +109,6 @@ jobs:
         cd ${{ github.event.inputs.DEVICE_PATH }}
         echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
-    - name: Check Manifest Branch
-      uses: haya14busa/action-cond@v1
-      id: fox_branch
-      with:
-        cond: ${{ github.event.inputs.MANIFEST_BRANCH == '11.0' || github.event.inputs.MANIFEST_BRANCH == '12.1' }}
-        if_true: lunch twrp_${{ github.event.inputs.DEVICE_NAME }}-eng && make clean && mka adbd ${{ github.event.inputs.BUILD_TARGET }}image
-        if_false: lunch omni_${{ github.event.inputs.DEVICE_NAME }}-eng && make clean && mka ${{ github.event.inputs.BUILD_TARGET }}image
-       
     - name: Building OrangeFox
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
@@ -130,7 +124,16 @@ jobs:
         export OF_VIRTUAL_AB_PARTITION_GROUPS="main"
         
         set -e
-        ${{ steps.fox_branch.outputs.value }}
+        # --- Lógica inteligente para AOSP 14.1 vs versiones anteriores ---
+        if [[ "${{ github.event.inputs.MANIFEST_BRANCH }}" == "14.1" ]]; then
+          echo "Detectado AOSP 14.1: Usando formato estricto de lunch..."
+          lunch twrp_${{ github.event.inputs.DEVICE_NAME }}-ap2a-userdebug
+        else
+          echo "Detectado AOSP heredado: Usando formato estándar..."
+          lunch twrp_${{ github.event.inputs.DEVICE_NAME }}-eng
+        fi
+        
+        make clean && mka adbd ${{ github.event.inputs.BUILD_TARGET }}image
 
     - name: Set Build Date
       run: |
@@ -147,9 +150,8 @@ jobs:
         if [ -f out/target/product/${{ github.event.inputs.DEVICE_NAME }}/OrangeFox*.img ]; then
             echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
             echo "FILE_PATH=${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}" >> $GITHUB_ENV
-            echo "MD5_IMG=$(md5sum out/target/product/${{ github.event.inputs.DEVICE_NAME }}/OrangeFox*.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
         else
-            echo "Recovery out directory is empty."
+            echo "La carpeta de salida del recovery está vacía."
         fi
 
     - name: Rename the Recovery
@@ -169,12 +171,25 @@ jobs:
         files: |
           ${{ env.FILE_PATH }}/${{ env.RECOVERY_TYPE }}.img
           ${{ env.FILE_PATH }}/OrangeFox*.zip
-        name: Unofficial OrangeFox for ${{ github.event.inputs.DEVICE_NAME }} // ${{ env.BUILD_DATE }}
+        name: OrangeFox No Oficial para ${{ github.event.inputs.DEVICE_NAME }} // ${{ env.BUILD_DATE }}
         tag_name: ${{ github.run_id }}
         body: |
           Build: OrangeFox ${{ github.event.inputs.MANIFEST_BRANCH }}
           Device: [Device Tree/Branch](${{ github.event.inputs.DEVICE_TREE }}/tree/${{ github.event.inputs.DEVICE_TREE_BRANCH }})
           Commit: Most recent [commit](${{ github.event.inputs.DEVICE_TREE }}/commit/${{ env.COMMIT_ID }}) during building.
+
+    - name: Run LDCheck para dependencias FBE
+      if: env.CHECK_IMG_IS_OK == 'true'
+      run: |
+        # Descargar el script oficial de LDCheck temporalmente
+        wget https://raw.githubusercontent.com/twrpdtgen/ldcheck/master/ldcheck -O ldcheck.py
+        
+        # Moverse a la carpeta raíz del recovery
+        cd ${{ env.FILE_PATH }}/recovery/root/
+        
+        echo "Analizando el blob de Microtrust: ${{ github.event.inputs.LDCHECK }} ..."
+        python3 ${GITHUB_WORKSPACE}/ldcheck.py -p system/lib64:vendor/lib64:system/lib:vendor/lib -d ${{ github.event.inputs.LDCHECK }}
+      continue-on-error: true
 
     - name: 🗑️ Final Cleanup
       if: always() 
