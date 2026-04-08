@@ -1,0 +1,112 @@
+name: PBRP - Build (Duchamp)
+
+on:
+  workflow_dispatch:
+    inputs:
+      MANIFEST_BRANCH:
+        description: 'PBRP Manifest Branch'
+        required: true
+        default: 'android-12.1'
+        type: choice
+        options:
+        - android-14.0
+        - android-12.1
+        - android-11.0
+      DEVICE_TREE:
+        description: 'URL de tu Device Tree'
+        required: true
+        default: 'https://github.com/david98pc/android_device_xiaomi_duchamp'
+      DEVICE_TREE_BRANCH:
+        description: 'Branch de tu Device Tree'
+        required: true
+        default: 'test'
+      DEVICE_NAME:
+        description: 'Codename del dispositivo'
+        required: true
+        default: 'duchamp'
+
+jobs:
+  build:
+    name: Compilando PBRP por ${{ github.actor }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+    - name: Check Out
+      uses: actions/checkout@v4
+
+    - name: 🧹 Limpieza de Espacio (Liberar Disco)
+      uses: rokibhasansagar/slimhub_actions@main
+      
+    - name: Configurar Swap (12GB)
+      uses: pierotofy/set-swap-space@master
+      with:
+        swap-size-gb: 12
+
+    - name: Preparar Entorno y Dependencias
+      run: |
+        sudo apt update && sudo apt -y upgrade
+        DEBIAN_FRONTEND=noninteractive sudo apt-get install -yq --no-install-recommends aria2 zip xz-utils bc ccache lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev libsdl1.2-dev build-essential libgtk-3-dev libglu1-mesa-dev freeglut3-dev git libxml2 lzop pngcrush schedtool squashfs-tools imagemagick libbz2-dev lzma ncftp qemu-user-static libstdc++-10-dev libncurses6 python3 tar python-is-python3
+        
+    - name: Configurar Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu'
+        java-version: |
+          ${{ inputs.MANIFEST_BRANCH == 'android-14.0' && '17' || '11' }}
+
+    - name: Instalar Git-Repo
+      run: |
+        mkdir -p ~/bin
+        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+        chmod a+x ~/bin/repo
+        sudo ln -sf ~/bin/repo /usr/bin/repo
+
+    - name: Sincronizar Código Fuente PBRP
+      run: |
+        mkdir -p ${GITHUB_WORKSPACE}/android-recovery
+        cd ${GITHUB_WORKSPACE}/android-recovery
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
+        repo init -u https://github.com/PitchBlackRecoveryProject/manifest_pb.git -b ${{ inputs.MANIFEST_BRANCH }} --depth=1
+        repo sync -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
+
+    - name: Clonar tu Device Tree (Duchamp)
+      run: |
+        cd ${GITHUB_WORKSPACE}/android-recovery
+        git clone ${{ inputs.DEVICE_TREE }} -b ${{ inputs.DEVICE_TREE_BRANCH }} ./device/xiaomi/${{ inputs.DEVICE_NAME }}
+        cd ./device/xiaomi/${{ inputs.DEVICE_NAME }}
+        echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
+
+    - name: Compilando PBRP
+      run: |
+        cd ${GITHUB_WORKSPACE}/android-recovery
+        source build/envsetup.sh
+        export ALLOW_MISSING_DEPENDENCIES=true
+        
+        # Lógica para Android 14 vs versiones anteriores
+        if [ "${{ inputs.MANIFEST_BRANCH }}" == "android-14.0" ]; then
+          lunch twrp_${{ inputs.DEVICE_NAME }}-ap2a-userdebug
+        else
+          lunch twrp_${{ inputs.DEVICE_NAME }}-eng
+        fi
+        
+        make clean && mka pbrp
+
+    - name: Set Build Date
+      run: |
+        echo "BUILD_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
+
+    - name: Subir a Release
+      uses: softprops/action-gh-release@master
+      with:
+        files: |
+          ${{ github.workspace }}/android-recovery/out/target/product/${{ inputs.DEVICE_NAME }}/PBRP*.zip
+          ${{ github.workspace }}/android-recovery/out/target/product/${{ inputs.DEVICE_NAME }}/vendor_boot.img
+        name: Unofficial PBRP para ${{ inputs.DEVICE_NAME }} // ${{ env.BUILD_DATE }}
+        tag_name: ${{ github.run_id }}
+        body: |
+          Build: Pitch Black Recovery Project ${{ inputs.MANIFEST_BRANCH }}
+          Device: [Device Tree/Branch](${{ inputs.DEVICE_TREE }}/tree/${{ inputs.DEVICE_TREE_BRANCH }})
+          Commit ID: ${{ env.COMMIT_ID }}
+          
