@@ -32,7 +32,6 @@ ENABLE_SCHEDBOOST := true
 # Arch Suffix
 TARGET_IS_64_BIT := true
 TARGET_BOARD_SUFFIX := _64
-TARGET_USES_64_BIT_BINDER := true
 
 # Assert
 TARGET_OTA_ASSERT_DEVICE := duchamp
@@ -131,7 +130,6 @@ TARGET_RECOVERY_FSTAB := $(DEVICE_PATH)/recovery/root/system/etc/recovery.fstab
 # System as root
 BOARD_HAS_NO_SELECT_BUTTON := true
 BOARD_SUPPRESS_SECURE_ERASE := true
-BOARD_BUILD_SYSTEM_ROOT_IMAGE := false
 
 # Properties
 TARGET_SYSTEM_PROP += $(DEVICE_PATH)/system.prop
@@ -154,11 +152,6 @@ TW_INPUT_BLACKLIST := "hbtp_vm"
 TW_USE_TOOLBOX := true
 TARGET_USES_MKE2FS := true
 TW_EXCLUDE_DEFAULT_USB_INIT := true
-
-# Include some binaries
-TW_INCLUDE_LIBRESETPROP := true
-TW_INCLUDE_REPACKTOOLS := true
-TW_INCLUDE_RESETPROP := true
 
 # Set brightness path and level
 TW_DEFAULT_BRIGHTNESS := 400
@@ -207,9 +200,6 @@ TARGET_USE_CUSTOM_LUN_FILE_PATH := /config/usb_gadget/g1/functions/mass_storage.
 TW_BATTERY_SYSFS_WAIT_SECONDS := 6
 TW_BACKUP_EXCLUSIONS := /data/fonts
 TW_USE_SERIALNO_PROPERTY_FOR_DEVICE_ID := true
-
-#screenshit
-TARGET_SCREEN_DENSITY := 480
 TARGET_SCREEN_HEIGHT := 2712
 TARGET_SCREEN_WIDTH := 1220
 # Ahorro masivo de espacio en particiones pequeñas
